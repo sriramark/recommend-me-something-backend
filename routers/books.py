@@ -21,10 +21,6 @@ GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
 openai.api_key = OPENAI_API_KEY
 
-@router.get("/var")
-def variable_test():
-    return {'key':OPENAI_API_KEY, 'TEST':'SUCCESS'}
-
 def get_book_detail(title):  
     query = f"intitle:{title}"
     url = f"https://www.googleapis.com/books/v1/volumes?q={query}&key={GOOGLE_API_KEY}"
