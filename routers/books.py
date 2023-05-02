@@ -64,11 +64,11 @@ async def suggest_books(q : str):
 
     books = response['choices'][0]['message']['content']
     books = books.replace("'s", 's')
-
+    print(books)
     try:
         suggested_books_title =  eval(books)
     except:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise HTTPException(status_code=404, detail=books)
     
     suggested_books = []
     book_sno = 1
