@@ -91,7 +91,7 @@ async def suggest_book(q : str):
     if q[-1] != '.':
         q += '.'
 
-    prompt = q + " Suggest a book according to my query in dict format containing data of book's title and how it helps with key names title and helps."
+    prompt = q + " Suggest a book according to my query in JSON format containing data of book's title and how it helps in variables title and helps."
     response = openai.ChatCompletion.create(
     model="gpt-3.5-turbo",
     temperature = 0.7,
@@ -101,10 +101,11 @@ async def suggest_book(q : str):
     )
 
     suggested_book = response['choices'][0]['message']['content']
+    suggested_book = suggested_book.replace("'s", 's')
     try:
         suggested_book = eval(suggested_book)
     except:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
     
     title = suggested_book['title']
     book_data = get_book_detail(title)
