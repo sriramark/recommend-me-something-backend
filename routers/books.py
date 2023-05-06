@@ -101,7 +101,7 @@ async def suggest_book(q : str):
     try:
         suggested_book = eval(suggested_book)
     except:
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        raise HTTPException(status_code=404, detail={'detail':'Please provide proper query'})
     
     title = suggested_book['title']
     book_data = get_book_detail(title)
