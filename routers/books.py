@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 import openai
+from openai.error import RateLimitError
 import requests
 from pathlib import Path
 
@@ -54,13 +55,17 @@ def get_book_detail(title):
 async def suggest_books(q : str):
     prompt = q + " Suggest book titles without author name in a single quoted python list according to my query."
 
-    response = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo",
-    temperature = 0.7,
-    messages=[
-            {"role": "user", "content": prompt},
-        ]
-    )
+    try:
+        response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        temperature = 0.7,
+        messages=[
+                {"role": "user", "content": prompt},
+            ]
+        )
+    except RateLimitError:
+        rate_limit_err = {'detail':'Request limit rate reached'}
+        raise HTTPException(status_code=429, detail=rate_limit_err)
 
     books = response['choices'][0]['message']['content']
     books = books.replace("'s", 's')
@@ -88,13 +93,19 @@ async def suggest_book(q : str):
         q += '.'
 
     prompt = q + " Suggest a book according to my query in JSON format containing data of book's title and how it helps in variables title and helps."
-    response = openai.ChatCompletion.create(
+    
+    try:
+        response = openai.ChatCompletion.create(
     model="gpt-3.5-turbo",
     temperature = 0.7,
     messages=[
             {"role": "user", "content": prompt},
         ]
     )
+
+    except RateLimitError:
+        rate_limit_err = {'detail':'Request limit rate reached'}
+        raise HTTPException(status_code=429, detail=rate_limit_err)
 
     suggested_book = response['choices'][0]['message']['content']
     suggested_book = suggested_book.replace("'s", 's')
