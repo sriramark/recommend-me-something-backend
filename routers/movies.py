@@ -82,8 +82,7 @@ async def suggest_movie(q : str):
         )
 
     except RateLimitError:
-        rate_limit_err = {'detail':'Request limit rate reached'}
-        raise HTTPException(status_code=429, detail=rate_limit_err)
+        raise HTTPException(status_code=429, detail='Request limit rate reached')
     
     suggested_movie = response['choices'][0]['message']['content']
     suggested_movie = suggested_movie.replace('"', '')
@@ -111,8 +110,7 @@ async def suggest_movies(q : str):
             ]
         )
     except RateLimitError:
-        rate_limit_err = {'detail':'Request limit rate reached'}
-        raise HTTPException(status_code=429, detail=rate_limit_err)
+        raise HTTPException(status_code=429, detail='Request limit rate reached')
     
     movies = response['choices'][0]['message']['content']
     print(movies)
