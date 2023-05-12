@@ -1,9 +1,9 @@
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 import openai
 from openai.error import RateLimitError
 import requests
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
@@ -22,25 +22,26 @@ GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
 openai.api_key = OPENAI_API_KEY
 
-def get_book_detail(title):  
+def get_book_detail(title):
     query = f"intitle:{title}"
     url = f"https://www.googleapis.com/books/v1/volumes?q={query}&key={GOOGLE_API_KEY}"
     response = requests.get(url)
     books_data = response.json() # Multiple books will be returned
 
     if books_data['totalItems'] != 0:
-        book = books_data['items'][0] # First book 
+        book_data = books_data['items'][0] # First book 
+
         try:
-            author = book['volumeInfo']['authors'][0] 
+            author = book_data['volumeInfo']['authors'][0] 
         except KeyError:
             author = 'Author not found'
         
         try:
-            cover_image_url = book['volumeInfo']['imageLinks']['thumbnail']
+            cover_image_url = book_data['volumeInfo']['imageLinks']['thumbnail']
         except KeyError:
             cover_image_url = 'assets/images/image-err.png'
         
-        preview_link = book['volumeInfo']['previewLink']
+        preview_link = book_data['volumeInfo']['previewLink']
 
         book_detail = {
             'title':title,
@@ -50,6 +51,42 @@ def get_book_detail(title):
         }
 
         return book_detail
+
+
+@router.get("/suggest")
+async def suggest_book(q : str):
+    if q[-1] != '.':
+        q += '.'
+
+    prompt = "Recommend a book title and how it helps seperated by '|' without author name according to:\n" + q + "\n Give output 'err' if query is not proper" + '\n\n book title:'   
+    try:
+        response = openai.ChatCompletion.create(
+    model="gpt-3.5-turbo",
+    temperature = 0.7,
+    messages=[
+            {"role": "user", "content": prompt},
+        ]
+    )
+
+    except RateLimitError:
+        raise HTTPException(status_code=429, detail='Request limit rate reached')
+
+    suggested_book = response['choices'][0]['message']['content']
+    suggested_book = suggested_book.replace("'s", 's').replace('"','')
+    
+    if suggested_book == 'err':
+        raise HTTPException(status_code=404, detail='Please provide proper query')
+    
+    book_title_helps = suggested_book.split('|')
+    title = book_title_helps[0]
+    book_data = get_book_detail(title)
+    book_data['description'] = book_title_helps[1]
+    
+    if book_data:
+        return book_data
+    
+    else:
+        raise HTTPException(status_code=404, detail='Please provide proper query')
 
 @router.get("/suggest-many")
 async def suggest_books(q : str):
@@ -64,16 +101,15 @@ async def suggest_books(q : str):
             ]
         )
     except RateLimitError:
-        rate_limit_err = {'detail':'Request limit rate reached'}
-        raise HTTPException(status_code=429, detail=rate_limit_err)
+        raise HTTPException(status_code=429, detail='Request limit rate reached')
 
     books = response['choices'][0]['message']['content']
     books = books.replace("'s", 's')
-    print(books)
     try:
         suggested_books_title =  eval(books)
     except:
-        raise HTTPException(status_code=404, detail=books)
+        raise HTTPException(status_code=404, detail='Provide proper query')
+   
     
     suggested_books = []
     book_sno = 1
@@ -85,37 +121,3 @@ async def suggest_books(q : str):
             book_sno += 1
     
     return suggested_books
-
-
-@router.get("/suggest")
-async def suggest_book(q : str):
-    if q[-1] != '.':
-        q += '.'
-
-    prompt = q + " Suggest a book according to my query in JSON format containing data of book's title and how it helps in variables title and helps."
-    
-    try:
-        response = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo",
-    temperature = 0.7,
-    messages=[
-            {"role": "user", "content": prompt},
-        ]
-    )
-
-    except RateLimitError:
-        rate_limit_err = {'detail':'Request limit rate reached'}
-        raise HTTPException(status_code=429, detail=rate_limit_err)
-
-    suggested_book = response['choices'][0]['message']['content']
-    suggested_book = suggested_book.replace("'s", 's')
-    try:
-        suggested_book = eval(suggested_book)
-    except:
-        raise HTTPException(status_code=404, detail={'detail':'Please provide proper query'})
-    
-    title = suggested_book['title']
-    book_data = get_book_detail(title)
-    book_data['description'] = suggested_book['helps']
-    
-    return book_data

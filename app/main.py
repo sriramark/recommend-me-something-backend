@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import books
+from routers import books, movies
 
 origins = ['*']
 
@@ -14,6 +14,7 @@ app.add_middleware(
 )
 
 app.include_router(books.router)
+app.include_router(movies.router)
 
 @app.get("/")
 def read_root():
