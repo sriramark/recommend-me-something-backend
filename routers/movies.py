@@ -42,6 +42,19 @@ def get_trailer_url(title):
 
     return trailer_url
 
+def get_genre_name(genre_id):
+    url = f'https://api.themoviedb.org/3/genre/movie/list?api_key={TMDB_API_KEY}'
+
+    response = requests.get(url)
+    data = response.json()
+
+    genres = data['genres']
+    for genre in genres:
+        if genre['id'] == genre_id:
+            return genre['name']
+
+    return 'Genre not found'
+
 def get_movie_detail(title):
     url = "https://api.themoviedb.org/3/search/movie"
 
@@ -65,6 +78,11 @@ def get_movie_detail(title):
         data['trailer_url'] = get_trailer_url(title)
         data['poster_url'] = f'https://image.tmdb.org/t/p/original/{data["poster_path"]}'
 
+        genre_names = []
+        for genre_id in data['genre_ids']:
+            genre_names.append(get_genre_name(genre_id))
+
+        data['genre_names'] = genre_names
         return data
     
     return {"status":"failed"}
