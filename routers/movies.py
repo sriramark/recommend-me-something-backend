@@ -56,7 +56,11 @@ def get_movie_detail(title):
 
     if response.status_code == 200:
         data = response.json()
-        data = data["results"][0]
+
+        try:
+            data = data["results"][0]
+        except:
+            raise HTTPException(status_code=500, detail='Could not process the request')
 
         data['trailer_url'] = get_trailer_url(title)
         data['poster_url'] = f'https://image.tmdb.org/t/p/original/{data["poster_path"]}'
