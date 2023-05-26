@@ -109,7 +109,7 @@ async def suggest_movie(q : str):
     suggested_movie = response['choices'][0]['message']['content']
     suggested_movie = suggested_movie.replace('"', '')
 
-    if suggested_movie == 'err':
+    if suggested_movie == 'err' or suggested_movie == 'Err':
         raise HTTPException(status_code=404, detail='Provide proper query')
     
     movie_data = get_movie_detail(suggested_movie)
