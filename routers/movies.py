@@ -121,7 +121,7 @@ async def suggest_movies(q : str):
     if q[-1] != '.':
         q += '.'
 
-    prompt = "Recommend movie titles in python list according to:\n" + q + '\n\n Movie titles in python list:'    
+    prompt = "Recommend movie titles in a double quoted python list according to:\n" + q + '\n\n Movie titles in python list:'    
 
     try:
         response = openai.ChatCompletion.create(
@@ -135,9 +135,7 @@ async def suggest_movies(q : str):
         raise HTTPException(status_code=429, detail='Request limit rate reached')
     
     movies = response['choices'][0]['message']['content']
-    print(movies)
     try:
-        print(movies)
         suggested_movies_title =  eval(movies)
     except:
         raise HTTPException(status_code=500, detail='Provide proper query')  
