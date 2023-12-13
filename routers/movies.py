@@ -36,9 +36,11 @@ def get_trailer_url(title):
     }
 
     response = requests.get('https://www.googleapis.com/youtube/v3/search', params=params)
-    video_id = response.json()['items'][0]['id']['videoId']
-
-    trailer_url = f'https://www.youtube.com/watch?v={video_id}'
+    try:
+        video_id = response.json()['items'][0]['id']['videoId']
+        trailer_url = f'https://www.youtube.com/watch?v={video_id}'
+    except:
+        trailer_url = 'None'
 
     return trailer_url
 
