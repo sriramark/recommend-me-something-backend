@@ -92,6 +92,7 @@ async def suggest_book(q : str):
 
 @router.get("/suggest-many")
 def suggest_books(q : str, db:Session = Depends(get_db)):
+    q = q.strip()
     db_book_search = get_book_search_by_query(db, q)
 
     if not db_book_search: # Data does not exists
