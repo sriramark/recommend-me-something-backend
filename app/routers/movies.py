@@ -1,26 +1,15 @@
-import os
-from dotenv import load_dotenv
-from pathlib import Path
 import openai
 from openai.error import RateLimitError
 import requests
 
 from fastapi import APIRouter, HTTPException
+from app.dependency import OPENAI_API_KEY, TMDB_API_KEY, YOUTUBE_DATA_API_KEY
 
 router = APIRouter(
     prefix="/movies",
     tags=["movies"],
     responses={404: {"description": "Not found"}},
 )
-
-
-BASE_DIR = Path(__file__).resolve().parent
-
-load_dotenv(os.path.join(BASE_DIR, ".env"))
-
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-TMDB_API_KEY = os.getenv("TMDB_API_KEY")
-YOUTUBE_DATA_API_KEY = os.getenv("YOUTUBE_DATA_API_KEY")
 
 openai.api_key = OPENAI_API_KEY
 
@@ -71,7 +60,6 @@ def get_movie_detail(title):
 
     if response.status_code == 200:
         data = response.json()
-
         try:
             data = data["results"][0]
         except:
@@ -94,7 +82,7 @@ def get_movie_detail(title):
 async def suggest_movie(q : str):
     if q[-1] != '.':
         q += '.'
-    prompt = "Recommend a movie title according to:\n" + q + "\n Give output 'err' if query is not proper" + '\n\n Movie title:'
+    prompt = "Recommend a single movie title according to:\n" + q + "\n Give output 'err' if query is not proper" + '\n\n Movie title:'
     
     try:
         response = openai.ChatCompletion.create(

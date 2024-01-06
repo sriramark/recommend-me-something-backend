@@ -1,9 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import books, movies
+from .routers import books, movies
 
 origins = ['*']
-
 app = FastAPI()
 
 app.add_middleware(
