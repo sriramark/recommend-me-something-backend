@@ -1,5 +1,6 @@
 from sqlalchemy import  Column, ForeignKey, Integer, String, Table
 from sqlalchemy.orm import relationship, Mapped
+from typing import List 
 
 from .database import Base
 
@@ -27,5 +28,5 @@ class BookSearch(Base):
     query = Column(String(256))
     search_count = Column(Integer)
 
-    books: Mapped[list[Book]] = relationship(secondary=association_table)
+    books: Mapped[List[Book]] = relationship(secondary=association_table)
 
