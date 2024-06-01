@@ -111,7 +111,7 @@ async def suggest_movies(q : str):
     if q[-1] != '.':
         q += '.'
 
-    prompt = "Recommend movie titles in a double quoted python list according to:\n" + q + '\n\n Movie titles in python list:'    
+    prompt = "Recommend movie or series titles in a double quoted python list according to:\n" + q + '\n\n Movie titles in python list:'    
 
     try:
         response = openai.ChatCompletion.create(

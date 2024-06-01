@@ -96,7 +96,7 @@ def suggest_books(q : str, db:Session = Depends(get_db)):
     db_book_search = get_book_search_by_query(db, q)
 
     if not db_book_search: # Data does not exists
-        db_book_search = BookSearch(query=q)
+        db_book_search = BookSearch(query=q, search_count=0)
 
         # Open AI suggestion
         prompt = q + " Suggest book titles without author name in a single quoted python list according to my query."
