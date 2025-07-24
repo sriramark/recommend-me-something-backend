@@ -1,9 +1,14 @@
-import openai
-from openai.error import RateLimitError
-import requests
+"""Movie recommendation endpoints."""
 
-from fastapi import APIRouter, HTTPException
-from app.dependency import OPENAI_API_KEY, TMDB_API_KEY, YOUTUBE_DATA_API_KEY
+import logging
+from typing import List, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends, Query
+
+from app.dependency import get_openai_service, get_movie_service
+from app.services import OpenAIService, MovieService
+from app.exceptions import ExternalAPIError, InvalidQueryError, RateLimitExceededError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/movies",
@@ -11,133 +16,101 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-openai.api_key = OPENAI_API_KEY
 
+@router.get("/suggest", summary="Get single movie recommendation")
+async def suggest_movie(
+    q: str = Query(..., description="Query for movie recommendation", min_length=3),
+    openai_service: OpenAIService = Depends(get_openai_service),
+    movie_service: MovieService = Depends(get_movie_service),
+) -> Dict[str, Any]:
+    """
+    Get a single movie recommendation based on user query.
 
-def get_trailer_url(title):
-    query = title + 'movie trailer'
+    - **q**: The query describing what kind of movie you're looking for
 
-    params = {
-        'part': 'snippet',
-        'q': query,
-        'type': 'video',
-        'key': YOUTUBE_DATA_API_KEY
-    }
-
-    response = requests.get('https://www.googleapis.com/youtube/v3/search', params=params)
+    Returns movie details including title, overview, poster, trailer, genres, and ratings.
+    """
     try:
-        video_id = response.json()['items'][0]['id']['videoId']
-        trailer_url = f'https://www.youtube.com/watch?v={video_id}'
-    except:
-        trailer_url = 'None'
+        # Get movie suggestion from OpenAI
+        suggested_title = openai_service.suggest_single_movie(q.strip())
 
-    return trailer_url
+        # Get movie details from TMDB and YouTube
+        movie_data = movie_service.get_movie_details(suggested_title)
 
-def get_genre_name(genre_id):
-    url = f'https://api.themoviedb.org/3/genre/movie/list?api_key={TMDB_API_KEY}'
+        logger.info(f"Successfully suggested movie: {suggested_title}")
+        return movie_data
 
-    response = requests.get(url)
-    data = response.json()
+    except InvalidQueryError as e:
+        logger.warning(f"Invalid query for movie suggestion: {q}")
+        raise HTTPException(status_code=400, detail=str(e))
 
-    genres = data['genres']
-    for genre in genres:
-        if genre['id'] == genre_id:
-            return genre['name']
+    except RateLimitExceededError as e:
+        logger.warning("Rate limit exceeded for movie suggestion")
+        raise HTTPException(status_code=429, detail=str(e))
 
-    return 'Genre not found'
-
-def get_movie_detail(title):
-    url = "https://api.themoviedb.org/3/search/movie"
-
-    api_key = TMDB_API_KEY
-
-    params = {
-        "api_key": api_key,
-        "query":title
-    }
-
-    response = requests.get(url, params=params)
-
-    if response.status_code == 200:
-        data = response.json()
-        try:
-            data = data["results"][0]
-        except:
-            raise HTTPException(status_code=500, detail='Could not process the request')
-
-        data['trailer_url'] = get_trailer_url(title)
-        data['poster_url'] = f'https://image.tmdb.org/t/p/original/{data["poster_path"]}'
-
-        genre_names = []
-        for genre_id in data['genre_ids']:
-            genre_names.append(get_genre_name(genre_id))
-
-        data['genre_names'] = genre_names
-        return data
-    
-    return {"status":"failed"}
+    except ExternalAPIError as e:
+        logger.error(f"External API error in movie suggestion: {str(e)}")
+        raise HTTPException(status_code=503, detail=str(e))
 
 
-@router.get("/suggest")
-async def suggest_movie(q : str):
-    if q[-1] != '.':
-        q += '.'
-    prompt = "Recommend a single movie title according to:\n" + q + "\n Give output 'err' if query is not proper" + '\n\n Movie title:'
-    
+@router.get("/suggest-many", summary="Get multiple movie recommendations")
+async def suggest_movies(
+    q: str = Query(..., description="Query for movie recommendations", min_length=3),
+    openai_service: OpenAIService = Depends(get_openai_service),
+    movie_service: MovieService = Depends(get_movie_service),
+) -> List[Dict[str, Any]]:
+    """
+    Get multiple movie recommendations based on user query.
+
+    - **q**: The query describing what kind of movies you're looking for
+
+    Returns a list of movies with details including title, overview, poster, trailer, genres, and ratings.
+    """
     try:
-        response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        temperature = 0.7,
-        messages=[   
-            {"role": "user", "content": prompt} 
-            ]
+        query = q.strip()
+
+        # Get movie suggestions from OpenAI
+        movie_titles = openai_service.suggest_multiple_movies(query)
+
+        if not movie_titles:
+            raise HTTPException(
+                status_code=404,
+                detail="No movie recommendations could be generated for this query",
+            )
+
+        # Get details for each movie
+        suggested_movies = []
+        for idx, movie_title in enumerate(movie_titles, 1):
+            try:
+                movie_data = movie_service.get_movie_details(movie_title)
+                movie_data["id"] = idx  # Add sequential ID for frontend
+                suggested_movies.append(movie_data)
+
+            except ExternalAPIError as e:
+                logger.warning(
+                    f"Failed to get details for movie '{movie_title}': {str(e)}"
+                )
+                continue
+
+        if not suggested_movies:
+            raise HTTPException(
+                status_code=404,
+                detail="Could not find details for any of the suggested movies",
+            )
+
+        logger.info(
+            f"Successfully suggested {len(suggested_movies)} movies for query: {query}"
         )
+        return suggested_movies
 
-    except RateLimitError:
-        raise HTTPException(status_code=429, detail='Request limit rate reached')
-    
-    suggested_movie = response['choices'][0]['message']['content']
-    suggested_movie = suggested_movie.replace('"', '')
+    except InvalidQueryError as e:
+        logger.warning(f"Invalid query for movie suggestions: {q}")
+        raise HTTPException(status_code=400, detail=str(e))
 
-    if suggested_movie == 'err' or suggested_movie == 'Err':
-        raise HTTPException(status_code=404, detail='Provide proper query')
-    
-    movie_data = get_movie_detail(suggested_movie)
-    return movie_data
+    except RateLimitExceededError as e:
+        logger.warning("Rate limit exceeded for movie suggestions")
+        raise HTTPException(status_code=429, detail=str(e))
 
-
-@router.get("/suggest-many")
-async def suggest_movies(q : str):
-    if q[-1] != '.':
-        q += '.'
-
-    prompt = "Recommend movie titles in a double quoted python list according to:\n" + q + '\n\n Movie titles in python list:'    
-
-    try:
-        response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        temperature = 0.7,
-        messages=[
-                {"role": "user", "content": prompt},
-            ]
-        )
-    except RateLimitError:
-        raise HTTPException(status_code=429, detail='Request limit rate reached')
-    
-    movies = response['choices'][0]['message']['content']
-    try:
-        suggested_movies_title =  eval(movies)
-    except:
-        raise HTTPException(status_code=500, detail='Provide proper query')  
-
-    suggested_movies = []
-    movie_sno = 1
-    for movie_title in suggested_movies_title:
-            movie = get_movie_detail(movie_title)
-            movie['id'] = movie_sno
-            suggested_movies.append(movie)
-
-            movie_sno += 1
-    
-    return suggested_movies     
-    
+    except ExternalAPIError as e:
+        logger.error(f"External API error in movie suggestions: {str(e)}")
+        raise HTTPException(status_code=503, detail=str(e))

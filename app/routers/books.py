@@ -1,11 +1,16 @@
-from fastapi import Depends, APIRouter, HTTPException
-import openai
-from openai.error import RateLimitError
-import requests
+"""Book recommendation endpoints."""
+
+import logging
+from typing import List
+from fastapi import Depends, APIRouter, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.models import Book, BookSearch
-from app.dependency import OPENAI_API_KEY, GOOGLE_API_KEY, get_db
+from app.schemas import Book as BookSchema
+from app.dependency import get_db, get_openai_service, get_book_service
+from app.services import OpenAIService, BookService
+from app.exceptions import ExternalAPIError, InvalidQueryError, RateLimitExceededError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/books",
@@ -13,125 +18,111 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-openai.api_key = OPENAI_API_KEY
 
-def get_book_search_by_query(db: Session, q:str):
-    return db.query(BookSearch).filter(BookSearch.query==q).first()
-
-def get_book_by_title(db: Session, title:str):
-    return db.query(Book).filter(Book.title==title).first()
-
-def get_book_detail(title):
+@router.get("/suggest", summary="Get single book recommendation")
+async def suggest_book(
+    q: str = Query(..., description="Query for book recommendation", min_length=3),
+    openai_service: OpenAIService = Depends(get_openai_service),
+    book_service: BookService = Depends(get_book_service),
+):
     """
-    Fetches books info from google books API
+    Get a single book recommendation based on user query.
+
+    - **q**: The query describing what kind of book you're looking for
+
+    Returns book details including title, author, cover image, preview URL, and description.
     """
-    query = f"intitle:{title}"
-    url = f"https://www.googleapis.com/books/v1/volumes?q={query}&key={GOOGLE_API_KEY}"
-    response = requests.get(url)
-    books_data = response.json() # Multiple books will be returned
-
-    if books_data['totalItems'] != 0:
-        book_data = books_data['items'][0] # First book 
-
-        try:
-            author = book_data['volumeInfo']['authors'][0] 
-        except KeyError:
-            author = 'Author not found'
-        
-        try:
-            cover_image_url = book_data['volumeInfo']['imageLinks']['thumbnail']
-        except KeyError:
-            cover_image_url = 'assets/images/image-err.png'
-        
-        preview_link = book_data['volumeInfo']['previewLink']
-
-        book_detail = {
-            'title':title,
-            'author':author,
-            'cover_image_url':cover_image_url, 
-            'preview_url' : preview_link
-        }
-
-        return book_detail
-
-
-@router.get("/suggest")
-async def suggest_book(q : str):
-    if q[-1] != '.':
-        q += '.'
-
-    prompt = "Recommend a book title and how it helps seperated by '|' without author name according to:\n" + q + "\n Give output 'err' if query is not proper" + '\n\n book title:'   
     try:
-        response = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo",
-    temperature = 0.7,
-    messages=[
-            {"role": "user", "content": prompt},
-        ]
-    )
+        # Get book suggestion from OpenAI
+        title, description = openai_service.suggest_single_book(q.strip())
 
-    except RateLimitError:
-        raise HTTPException(status_code=429, detail='Request limit rate reached')
+        # Get book details from Google Books
+        book_details = book_service.google_books_service.get_book_details(title)
 
-    suggested_book = response['choices'][0]['message']['content']
-    suggested_book = suggested_book.replace("'s", 's').replace('"','')
-    
-    if suggested_book == 'err':
-        raise HTTPException(status_code=404, detail='Please provide proper query')
-    
-    book_title_helps = suggested_book.split('|')
-    title = book_title_helps[0]
-    book_data = get_book_detail(title)
-    book_data['description'] = book_title_helps[1]
-    
-    if book_data:
-        return book_data
-    
-    else:
-        raise HTTPException(status_code=404, detail='Please provide proper query')
-
-@router.get("/suggest-many")
-def suggest_books(q : str, db:Session = Depends(get_db)):
-    q = q.strip()
-    db_book_search = get_book_search_by_query(db, q)
-
-    if not db_book_search: # Data does not exists
-        db_book_search = BookSearch(query=q, search_count=0)
-
-        # Open AI suggestion
-        prompt = q + " Suggest book titles without author name in a single quoted python list according to my query."
-        try:
-            response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            temperature = 0.7,
-            messages=[
-                    {"role": "user", "content": prompt},
-                ]
+        if not book_details:
+            raise HTTPException(
+                status_code=404,
+                detail="Could not find book details for the suggested title",
             )
-        except RateLimitError:
-            raise HTTPException(status_code=429, detail='Request limit rate reached')
 
-        # Serializing response
-        books = response['choices'][0]['message']['content']
-        books = books.replace("'s", 's')
+        # Add AI-generated description
+        book_details["description"] = description
 
-        try:
-            suggested_books_title =  eval(books)
-        except:
-            raise HTTPException(status_code=404, detail='Provide proper query')
+        logger.info(f"Successfully suggested book: {title}")
+        return book_details
 
-        for book_title in suggested_books_title:
-                book = get_book_detail(book_title)
-                # Adds book detail to db
-                db_book = get_book_by_title(db, book['title'])
-                if not db_book: # Book doesn't exist in db
-                    db_book = Book(title=book['title'], author=book['author'], preview_url=book['preview_url'], cover_image_url=book['cover_image_url'])
-                
-                db_book_search.books.append(db_book)
-    
-        db.add(db_book_search)
-        db.commit()
-        db.refresh(db_book_search)
+    except InvalidQueryError as e:
+        logger.warning(f"Invalid query for book suggestion: {q}")
+        raise HTTPException(status_code=400, detail=str(e))
 
-    return db_book_search.books
+    except RateLimitExceededError as e:
+        logger.warning("Rate limit exceeded for book suggestion")
+        raise HTTPException(status_code=429, detail=str(e))
 
+    except ExternalAPIError as e:
+        logger.error(f"External API error in book suggestion: {str(e)}")
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@router.get(
+    "/suggest-many",
+    response_model=List[BookSchema],
+    summary="Get multiple book recommendations",
+)
+async def suggest_books(
+    q: str = Query(..., description="Query for book recommendations", min_length=3),
+    db: Session = Depends(get_db),
+    openai_service: OpenAIService = Depends(get_openai_service),
+    book_service: BookService = Depends(get_book_service),
+):
+    """
+    Get multiple book recommendations based on user query.
+
+    - **q**: The query describing what kind of books you're looking for
+
+    Returns a list of books with details including title, author, cover image, and preview URL.
+    Results are cached to improve performance for repeated queries.
+    """
+    try:
+        query = q.strip()
+
+        # Check if we have cached results
+        cached_search = book_service.get_book_search_by_query(db, query)
+        if cached_search and cached_search.books:
+            logger.info(f"Returning cached results for query: {query}")
+            return cached_search.books
+
+        # Get book suggestions from OpenAI
+        book_titles = openai_service.suggest_multiple_books(query)
+
+        if not book_titles:
+            raise HTTPException(
+                status_code=404,
+                detail="No book recommendations could be generated for this query",
+            )
+
+        # Create book search record with details
+        book_search = book_service.create_book_search(db, query, book_titles)
+
+        if not book_search.books:
+            raise HTTPException(
+                status_code=404,
+                detail="Could not find details for any of the suggested books",
+            )
+
+        logger.info(
+            f"Successfully suggested {len(book_search.books)} books for query: {query}"
+        )
+        return book_search.books
+
+    except InvalidQueryError as e:
+        logger.warning(f"Invalid query for book suggestions: {q}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except RateLimitExceededError as e:
+        logger.warning("Rate limit exceeded for book suggestions")
+        raise HTTPException(status_code=429, detail=str(e))
+
+    except ExternalAPIError as e:
+        logger.error(f"External API error in book suggestions: {str(e)}")
+        raise HTTPException(status_code=503, detail=str(e))
